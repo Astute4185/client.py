@@ -6,6 +6,7 @@ import asyncio
 import base64
 from dataclasses import dataclass
 from http import HTTPStatus
+import re
 import time
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urljoin
@@ -24,13 +25,17 @@ from .exceptions import (
 )
 from .logging_filter import get_logger
 from .models import AccountCredentials, Credentials
+from .ngiot_client import NgiotClient
 from .rs.crypto import PublicKey
+from .sst_authentication import SstAuthenticator
 from .util import cancel, create_task, md5
 from .util.continents import get_continent_url_postfix
 from .util.countries import get_ecovacs_country
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Mapping
+
+    from .models import ApiDeviceInfo
 
 
 _LOGGER = get_logger(__name__)
@@ -54,6 +59,10 @@ _META = {
 _ANDROID_MODEL = "Pixel 7"
 _ANDROID_SYSTEM = "Android 14"
 MAX_RETRIES = 3
+_NGIOT_HOST_PATTERN = re.compile(
+    r"(?:https://)?api-ngiot\.dc-([a-z0-9]+(?:-[a-z0-9]+)*)\.ww\.ecouser\.net/?",
+    re.IGNORECASE | re.ASCII,
+)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -487,6 +496,8 @@ class Authenticator:
         *,
         account_credentials: AccountCredentials | None = None,
     ) -> None:
+        self._session = config.session
+        self._ngiot_clients: dict[str, NgiotClient] = {}
         self._auth_client = _AuthClient(
             config,
             account_id,
@@ -506,6 +517,26 @@ class Authenticator:
         self._refresh_handle: asyncio.TimerHandle | None = None
         self._tasks: set[asyncio.Future[Any]] = set()
         self._account_tasks: set[asyncio.Future[Any]] = set()
+
+    def get_ngiot_client(self, device: ApiDeviceInfo) -> NgiotClient:
+        """Return the NGIOT client for the device's region, creating it on demand."""
+        service = device.get("service")
+        host = service.get("mqs") if isinstance(service, dict) else None
+        match = _NGIOT_HOST_PATTERN.fullmatch(host) if isinstance(host, str) else None
+        if match is None:
+            raise ApiError("Missing or unsupported NGIOT service endpoint")
+
+        region = match[1].lower()
+        if region not in self._ngiot_clients:
+            suffix = f"dc-{region}.ww.ecouser.net"
+            self._ngiot_clients[region] = NgiotClient(
+                self._session,
+                SstAuthenticator(
+                    self._session, self, base_url=f"https://api-base.{suffix}"
+                ),
+                base_url=f"https://api-ngiot.{suffix}",
+            )
+        return self._ngiot_clients[region]
 
     @property
     def account_credentials(self) -> AccountCredentials | None:
@@ -611,6 +642,7 @@ class Authenticator:
 
     async def teardown(self) -> None:
         """Teardown authenticator."""
+        self._ngiot_clients.clear()
         self._cancel_refresh_task()
         # Let subscribers finish storing new account credentials. Cancelling
         # them would lose the only way to renew without the password, and the
