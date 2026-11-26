@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .common import ExecuteCommand
+from .common import ExecuteCommand, NgiotJsonCommand
 
 
 class PlaySound(ExecuteCommand):
@@ -12,3 +12,13 @@ class PlaySound(ExecuteCommand):
 
     def __init__(self) -> None:
         super().__init__({"count": 1, "sid": 30})
+
+
+class NgiotPlaySound(NgiotJsonCommand, ExecuteCommand):
+    """Trigger the robot locator sound through NGIOT."""
+
+    NAME = "ngiotPlaySound"
+    APN = "40019"
+
+    def __init__(self) -> None:
+        super().__init__({"seek": True})

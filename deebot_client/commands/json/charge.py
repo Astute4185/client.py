@@ -9,7 +9,7 @@ from deebot_client.logging_filter import get_logger
 from deebot_client.message import HandlingResult
 from deebot_client.models import State
 
-from .common import ExecuteCommand
+from .common import ExecuteCommand, NgiotJsonCommand
 from .const import CODE
 
 if TYPE_CHECKING:
@@ -43,3 +43,13 @@ class Charge(ExecuteCommand):
             return HandlingResult.success()
 
         return super()._handle_body(event_bus, body)
+
+
+class NgiotCharge(NgiotJsonCommand, ExecuteCommand):
+    """Request return to the dock through NGIOT."""
+
+    NAME = "ngiotCharge"
+    APN = "40013"
+
+    def __init__(self) -> None:
+        super().__init__({"chargeSwitch": True})

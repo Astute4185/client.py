@@ -8,7 +8,11 @@ from deebot_client.events import StateEvent
 from deebot_client.message import HandlingResult, MessageBodyDataDict
 from deebot_client.models import State
 
-from .common import JsonCommandWithMessageHandling
+from .common import (
+    JsonCommandWithMessageHandling,
+    JsonGetCommand,
+    NgiotJsonCommand,
+)
 from .const import CODE
 
 if TYPE_CHECKING:
@@ -52,3 +56,25 @@ class GetChargeState(JsonCommandWithMessageHandling, MessageBodyDataDict):
             return HandlingResult.success()
 
         return HandlingResult.analyse()
+
+
+class NgiotGetChargeState(NgiotJsonCommand, JsonGetCommand):
+    """Get docked state through NGIOT."""
+
+    NAME = "ngiotGetChargeState"
+    APN = "10001"
+
+    def __init__(self) -> None:
+        super().__init__({"fields": ["chargeStatus"]})
+
+    @classmethod
+    def _handle_body_data_dict(
+        cls, event_bus: EventBus, data: dict[str, Any]
+    ) -> HandlingResult:
+        charge_status = data.get("chargeStatus")
+        if not isinstance(charge_status, bool):
+            return HandlingResult.analyse()
+        # A false value alone cannot distinguish cleaning, returning and idle.
+        if charge_status:
+            event_bus.notify(StateEvent(State.DOCKED))
+        return HandlingResult.success()
